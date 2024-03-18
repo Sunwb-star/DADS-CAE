@@ -6,6 +6,7 @@ import warnings
 import h5py
 import numpy
 import torch
+from matplotlib import pyplot as plt
 
 from net.monitor_client import MonitorClient
 from server_func import start_client, start_client_linear
@@ -77,8 +78,8 @@ if __name__ == '__main__':
     elif model_type == "AutoEncoderConv":
         # input_data = input_data.view(-1, 1, 240, 240)
         partition_point = 19
-        # plt.figure()
-        # plt.imshow(input_data[0, 1, :, :].cpu().detach().numpy())
-        # plt.show()
+        plt.figure()
+        plt.imshow(input_data[0, 1, :, :].cpu().detach().numpy())
+        plt.show()
         # 传入的数据形状是(1, 24, 240, 240)
         start_client_linear(ip, port, input_data, model_type, partition_point, device)

@@ -1,4 +1,5 @@
 import torch
+from matplotlib import pyplot as plt
 
 import net.net_utils as net
 from dads_framework.dads import algorithm_DSL, get_partition_points
@@ -223,7 +224,6 @@ def start_server_linear(_conn, _client, _model_type, device):
     # 首先进行二值化处理，得到新的地图(1,24,240,240)
     threshold = 0.25
     encoder_decoder_data[0, :23] = (encoder_decoder_data[0, :23] > threshold).float()
-    # plt.figure()
-    # plt.imshow(encoder_decoder_data[0, 1, :, :].cpu().detach().numpy())
-    # plt.show()
-    
+    plt.figure()
+    plt.imshow(encoder_decoder_data[0, 1, :, :].cpu().detach().numpy())
+    plt.show()
