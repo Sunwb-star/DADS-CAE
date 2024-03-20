@@ -6,11 +6,13 @@ import torch.nn as nn
 import models.EasyModel as Easynet
 import models.InceptionBlock as Inception
 import models.InceptionBlockV2 as Inception_v2
+import models.SemExpModel as SemExpNet
 from models.AlexNet import AlexNet
-from models.AutoEncoderConv import Autoencoder
+from models.AutoEncoderS import Autoencoder
 from models.EasyModel import EasyModel
 from models.InceptionBlock import InceptionBlock
 from models.InceptionBlockV2 import InceptionBlockV2
+from models.SemExpLinearModel import Sem_Exp
 from models.VggNet import VggNet
 from utils.excel_utils import *
 
@@ -35,6 +37,8 @@ def get_dnn_model(arg: str):
         return InceptionBlockV2(in_channels=input_channels)
     elif arg == "AutoEncoderConv":
         return Autoencoder()
+    elif arg == "Sem_Exp":
+        return Sem_Exp()
     else:
         raise RuntimeError("没有对应的DNN模型")
 
@@ -271,6 +275,8 @@ def model_partition(model, model_partition_edge):
         return Inception_v2.construct_edge_cloud_inception_block(model, model_partition_edge)
     if isinstance(model, Easynet.EasyModel):
         return Easynet.construct_edge_cloud_inception_block(model, model_partition_edge)
+    if isinstance(model, SemExpNet.Sem_Exp):
+        return SemExpNet.construct_edge_cloud_inception_block(model, model_partition_edge)
 
     # 使用链式结构的划分
     if len(model_partition_edge) == 1:

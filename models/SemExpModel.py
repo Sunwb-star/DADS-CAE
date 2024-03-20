@@ -3,7 +3,7 @@ from collections import abc
 import torch
 import torch.nn as nn
 
-from utils_model import Flatten, NNBase
+from utils.utils_model import Flatten, NNBase
 
 
 def getBlockIndex(item, accumulate_len):
@@ -39,13 +39,33 @@ class Operation_Concat(nn.Module):
         return self.res
 
 
+class Dict_Intput(nn.Module):
+    """
+    相当于将输入数据的位置添加了一个节点，不对数据进行任何变换只是输出原始数据
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.input = 0
+
+    def forward(self, inputs):
+        # 不对数据进行任何变换只是输出原始数据
+        self.input = inputs
+        return self.input
+
+
 class Sem_Exp(NNBase):
-    def __init__(self, input_shape, recurrent=False, hidden_size=512, num_sem_categories=16):
+    def __init__(self, input_shape, recurrent=False, hidden_size=256, num_sem_categories=16):
         # input_shape的大小是(num_scenes, 24, 240, 240)
         super(Sem_Exp, self).__init__(recurrent, hidden_size, hidden_size)
         # input_shape[1]的值是local_w:240，input_shape[2]的值是local_h:240
         # 所以out_size的值是(240/16)*(240*16) = 15*15 = 225
-        out_size = int(input_shape[1] / 16.) * int(input_shape[2] / 16.)
+        out_size = 225
+        # 接收输入数据的输入节点
+        self.input = nn.Sequential(
+            Dict_Intput()
+        )
+        # 分支1
         self.main = nn.Sequential(
             nn.MaxPool2d(2),
             nn.Conv2d(num_sem_categories + 8, 32, 3, stride=1, padding=1),
@@ -63,18 +83,26 @@ class Sem_Exp(NNBase):
             nn.ReLU(),
             Flatten()
         )
+        # 分支2
+        self.orientation_emb = nn.Sequential(
+            nn.Embedding(72, 8)
+        )
+        # 分支3
+        self.goal_emb = nn.Sequential(
+            nn.Embedding(num_sem_categories, 8)
+        )
+        # 用于拼接工作的模块
+        self.concat = Operation_Concat()
+        # 用于后续输出的网络序列
         self.second = nn.Sequential(
             nn.Linear(out_size * 32 + 8 * 2, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, 256),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Linear(256, 2)
         )
-        self.orientation_emb = nn.Embedding(72, 8)
-        self.goal_emb = nn.Embedding(num_sem_categories, 8)
-        self.concat = Operation_Concat()
-
-        # 将三层的branch放入一个列表中进行迭代
-        self.branch_list = [self.main, self.orientation_emb, self.goal_emb, self.second]
+        # 将4层网络模型放入一个列表中进行迭代
+        self.branch_list = [self.input, self.main, self.orientation_emb, self.goal_emb]
         # 记录累积的长度
         self.accumulate_len = []
         # 对于self.branch_list的列表长度进行
@@ -90,28 +118,31 @@ class Sem_Exp(NNBase):
         # self.has_dag_topology表示该网络需要变成DAG的拓扑结构
         self.has_dag_topology = True
         # self.record_output_list记录整个模型中的哪几层需要保存输出，也就是说在每一个branch的结尾处需要保存输出
-        self.record_output_list = [self.accumulate_len[0], self.accumulate_len[1], self.accumulate_len[2]]
+        self.record_output_list = [self.accumulate_len[0], self.accumulate_len[1], self.accumulate_len[2],
+                                   self.accumulate_len[3]]
         # 定义DAG拓扑相关层的输入
         # 这样的字典结构可能用于描述一个有向无环图（DAG）中节点之间的依赖关系或某种范围映射。
         # 键表示范围的上界，值表示范围的下界或依赖节点。在这个特定的例子中，这样的映射可能在某种图形算法或数据结构中发挥作用。
-        # 最终self.accumulate_len的内容是[1, 2, 3]
-        # self.dag_dict的内容是{2: 1, 3: 1, 4: [2, 3]}，这样就像是一个DAG拓扑结构，是一种总分总的结构，
-        # 每一个数值标识模型中唯一的一层网络，表示第二层依赖于第一层，第三层依赖于第一层，第四层依赖于第二层和第三层
+        # 最终self.accumulate_len的内容是[1, 16, 17, 18]
+        # self.dag_dict的内容是{2: 1, 17: 1, 18: 1, 19: [16, 17, 18]}，这样就像是一个DAG拓扑结构，是一种总分总的结构，
+        # 每一个数值标识模型中唯一的一层网络，表示第2层依赖于第1层，第17层依赖于第1层，第18层依赖于第1层第19层依赖于第16层和第17层和第18层
         self.dag_dict = {
             self.accumulate_len[0] + 1: self.accumulate_len[0],
             self.accumulate_len[1] + 1: self.accumulate_len[0],
-            self.accumulate_len[2] + 1: [self.accumulate_len[1], self.accumulate_len[2], ],
+            self.accumulate_len[2] + 1: self.accumulate_len[0],
+            self.accumulate_len[3] + 1: [self.accumulate_len[1], self.accumulate_len[2], self.accumulate_len[3]]
         }
 
-    # 前向传播函数
-    def forward(self, inputs, extras):
-        x = self.main(inputs)
-        orientation_emb = self.orientation_emb(extras[:, 0])
-        goal_emb = self.goal_emb(extras[:, 1])
+    def forward(self, inputs):
+        inputs = self.input(inputs)
+        x = self.main(inputs[0])
+        orientation_emb = self.orientation_emb(inputs[1]).unsqueeze(0)
+        goal_emb = self.goal_emb(inputs[2]).unsqueeze(0)
         data_list = [x, orientation_emb, goal_emb]
-        x = self.concat(data_list)
-        x = self.second(x)
-        return x
+        # print(x.shape, orientation_emb.shape, goal_emb.shape)
+        output = self.concat(data_list)
+        output = self.second(output)
+        return output
 
     def __len__(self):
         # 最终的长度等于self.accumulate_len累积长度总长度+1
@@ -121,9 +152,9 @@ class Sem_Exp(NNBase):
         # 如果超出模型整体的累积长度范围的话，就停止迭代
         if item >= self.accumulate_len[-1] + 1:
             raise StopIteration()
-        # 根据传入的item取出正确的DNN层
+        # 根据传入的item推断出所在的Block的位置
         part_index = getBlockIndex(item, self.accumulate_len)
-        # 直接从第一个branch当中去找DNN层
+        # 如果推理出的从第一个branch当中去找DNN层
         if part_index == 0:
             layer = self.branch_list[part_index][item]
         # 如果还能在self.branch_list当中找到这个index对应的值的话就获取到该层
@@ -143,7 +174,7 @@ class Inception_SentenceIterator(abc.Iterator):
         self.branch_list = branch_list
         # 累积长度列表
         self.accumulate_len = accumulate_len
-        # 最后用于拼接整个tensor的layer
+        # 最后用于输出模型结果的网络层
         self.concat = concat
         # 迭代时用于标记当前层数的index
         self._index = 0
@@ -170,20 +201,21 @@ class Inception_SentenceIterator(abc.Iterator):
 class sem_exp_dag_part(nn.Module):
     def __init__(self, branches):
         super(sem_exp_dag_part, self).__init__()
-        # self.branch1表示分支网络1
-        self.branch1 = branches[0]
-        # self.branch2表示分支网络2
-        self.branch2 = branches[1]
+        # 三个分支网络
+        self.main = branches[0]
+        self.orientation_emb = branches[1]
+        self.goal_emb = branches[2]
         # self.concat表示最后的合并网络Operation_Concat
         self.concat = Operation_Concat()
 
-    def forward(self, x):
-        # 两个分支分别根据传入的数据进行计算
-        branch1 = self.branch1(x)
-        branch2 = self.branch2(x)
+    def forward(self, input_data):
+        # 三个分支分别根据传入的数据进行计算
+        main = self.main(input_data[0])
+        orientation_emb = self.orientation_emb(input_data[1])
+        goal_emb = self.goal_emb(input_data[2])
         # 两个的输出放入到一个列表当中进行维度合并生成一个新的特征数据作为输出结果
-        outputs = [branch1, branch2]
-        return self.concat(outputs)
+        concat = self.concat(main, orientation_emb, goal_emb)
+        return concat
 
 
 class EdgeInception(nn.Module):
@@ -196,13 +228,15 @@ class EdgeInception(nn.Module):
         # 边端模型部分的两个分支
         self.branch1 = edge_branches[0]
         self.branch2 = edge_branches[1]
+        self.branch3 = edge_branches[2]
 
-    def forward(self, x):
+    def forward(self, input):
         # 边端中模型的分支分别进行计算结果
-        branch1 = self.branch1(x)
-        branch2 = self.branch2(x)
+        branch1 = self.branch1(input[0])
+        branch2 = self.branch2(input[1])
+        branch3 = self.branch3(input[2])
         # 作为中间结果进行输出
-        outputs = [branch1, branch2]
+        outputs = [branch1, branch2, branch3]
         return outputs
 
 
@@ -216,15 +250,20 @@ class CloudInception(nn.Module):
         # 云端会有一个用来合并最终输出结果的层self.concat
         self.branch1 = cloud_branches[0]
         self.branch2 = cloud_branches[1]
+        self.branch2 = cloud_branches[2]
         self.concat = Operation_Concat()
+        self.dnn = cloud_branches[3]
 
     def forward(self, x):
         # 在两条分支上分别进行继续推理
         branch1 = self.branch1(x[0])
         branch2 = self.branch2(x[1])
-        outputs = [branch1, branch2]
-        # 合并最终结果
-        return self.concat(outputs)
+        branch3 = self.branch3(x[2])
+        # 合并中间输入
+        outputs = [branch1, branch2, branch3]
+        data = self.concat(outputs)
+        # 返回结果
+        return self.dnn(data)
 
 
 def construct_edge_cloud_inception_block(model: Sem_Exp, model_partition_edge: list):
@@ -255,20 +294,22 @@ def construct_edge_cloud_inception_block(model: Sem_Exp, model_partition_edge: l
             else:
                 cloud_model.add_module(f"{idx}-{layer.__class__.__name__}", layer)
             idx += 1
-        # 利用sem_exp_dag_part构建分支之后的所有分支网络
+        # 利用easy_dag_part构建分支之后的所有分支网络
         layer = sem_exp_dag_part(model.branch_list[1:])
         # 将后面的分支网络作为一个整体来加入到cloud当中
         cloud_model.add_module(f"{idx}-{layer.__class__.__name__}", layer)
     else:
-        # 如果model_partition_edge的长度是2的话就代表需要在几个个branch之间进行划分
-        assert len(model_partition_edge) == 2
+        # 如果model_partition_edge的长度是3的话就代表需要在几个branch之间进行划分
+        assert len(model_partition_edge) == 3
         # 抽离出分支网络
         branches = model.branch_list[1:]
         # 首先在edge模型端加入最开始的总的分支网络部分
-        edge_model.add_module(f"1-preInference", model.preInference)
+        edge_model.add_module(f"1-input", model.input)
         # 对边缘端的分支和云端的分支分别进行列表存储
         edge_branches = []
         cloud_branches = []
+        # 对model_partition_edge进行排序，首先按照子列表的第二个元素进行排序，然后再按照第一个元素进行排序
+        model_partition_edge = sorted(model_partition_edge, key=lambda x: (x[1], x[0]))
         # 对于model_partition_edge中存储的需要被分割的边，分别进行操作
         for edge in model_partition_edge:
             # 初始化边端和云端的模型分支
@@ -286,6 +327,10 @@ def construct_edge_cloud_inception_block(model: Sem_Exp, model_partition_edge: l
                   edge[1] in range(accumulate_len[1] + 1, accumulate_len[2] + 1)):
                 block = branches[1]
                 tmp_point = edge[0] - accumulate_len[1]
+            elif (edge[0] in range(accumulate_len[2] + 1, accumulate_len[3] + 1) or
+                  edge[1] in range(accumulate_len[2] + 1, accumulate_len[3] + 1)):
+                block = branches[2]
+                tmp_point = edge[0] - accumulate_len[2]
             # 对block对应的branch进行分割，分别存入到edge_branch和cloud_branch中
             idx = 1
             for layer in block:
@@ -298,11 +343,23 @@ def construct_edge_cloud_inception_block(model: Sem_Exp, model_partition_edge: l
             edge_branches.append(edge_branch)
             cloud_branches.append(cloud_branch)
 
-        # 最终在不同的branch上进行了不同的分割点分割。
+        # 最终在不同的branch上进行了不同的分割点分割
         # 使用edge_branches以及cloud_branches构建EdgeInception以及CloudInception两个类
+        # 在云端模型中，将后续的DNN也加入到云端模型中
+        cloud_branches.append(model.second)
         edge_Inception = EdgeInception(edge_branches)
         cloud_Inception = CloudInception(cloud_branches)
         # 将分割好的模型分别放入到对应的边端上
         edge_model.add_module(f"2-edge-inception", edge_Inception)
         cloud_model.add_module(f"1-cloud-inception", cloud_Inception)
     return edge_model, cloud_model
+
+
+if __name__ == "__main__":
+    model = Sem_Exp(input_shape=(1, 24, 240, 240))
+    model.to("cpu")
+    print(model.accumulate_len)
+    print(model.record_output_list)
+    print(model.dag_dict)
+    print(len(model))
+    print(model.second)

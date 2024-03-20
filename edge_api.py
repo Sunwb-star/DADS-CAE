@@ -6,10 +6,10 @@ import warnings
 import h5py
 import numpy
 import torch
-from matplotlib import pyplot as plt
 
 from net.monitor_client import MonitorClient
-from server_func import start_client, start_client_linear
+from server_func import start_client_linear
+from server_func import start_client_sem
 
 warnings.filterwarnings("ignore")
 
@@ -56,10 +56,10 @@ if __name__ == '__main__':
 
     # 根据带宽和其他的一些信息来选择走哪一条分支
     print(f"get bandwidth value : {bandwidth_value.value} MB/s")
-    if (bandwidth_value.value > 10):
-        model_type = "AutoEncoderConv"
-    else:
-        model_type = "Sem_Exp"
+    # if (bandwidth_value.value < 10):
+    #     model_type = "AutoEncoderConv"
+    # else:
+    #     model_type = "Sem_Exp"
     # step2 准备input数据
     hdf5_file_path = "models/autoencoder_data.h5"
     with h5py.File(hdf5_file_path, 'r') as f:
@@ -68,18 +68,23 @@ if __name__ == '__main__':
         input_data = loaded_tensor[0].unsqueeze(0)
 
     input_data = input_data.to(device)
+    orientation = torch.tensor(30).to(device)
+    goal_index = torch.tensor(0).to(device)
     # 部署阶段 - 选择优化分层点
     upload_bandwidth = bandwidth_value.value  # MBps
     # MBps 为确保程序正确运行 这里设置为10；实机运行使用上面那行
     # upload_bandwidth = 10
     # 使用云边协同的方式进行模拟，传入相关的参数进行设置
     if model_type == "Sem_Exp":
-        start_client(ip, port, input_data, model_type, upload_bandwidth, device)
+        # 传入的参数input_data的形状是(1, 24, 240, 240)
+        input_x = [input_data, orientation, goal_index]
+        partition_point = 15
+        start_client_sem(ip, port, input_x, model_type, partition_point, device)
     elif model_type == "AutoEncoderConv":
         # input_data = input_data.view(-1, 1, 240, 240)
-        partition_point = 19
-        plt.figure()
-        plt.imshow(input_data[0, 1, :, :].cpu().detach().numpy())
-        plt.show()
+        partition_point = 7
+        # plt.figure()
+        # plt.imshow(input_data[0, 1, :, :].cpu().detach().numpy())
+        # plt.show()
         # 传入的数据形状是(1, 24, 240, 240)
-        start_client_linear(ip, port, input_data, model_type, partition_point, device)
+        start_client_linear(ip, port, input_data, model_type, partition_point, device, orientation, goal_index)

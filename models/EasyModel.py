@@ -112,7 +112,7 @@ class EasyModel(nn.Module):
         if item >= self.accumulate_len[-1] + 1:
             raise StopIteration()
 
-        # 根据传入的item取出正确的DNN层
+        # 根据传入的item推断出所在的Block的位置
         part_index = getBlockIndex(item, self.accumulate_len)
         # 直接从第一个branch当中去除DNN层
         if part_index == 0:
@@ -297,3 +297,12 @@ def construct_edge_cloud_inception_block(model: EasyModel, model_partition_edge:
         edge_model.add_module(f"2-edge-inception", edge_Inception)
         cloud_model.add_module(f"1-cloud-inception", cloud_Inception)
     return edge_model, cloud_model
+
+
+if __name__ == "__main__":
+    model = EasyModel()
+    model.to("cpu")
+    print(model.accumulate_len)
+    print(model.record_output_list)
+    print(model.dag_dict)
+    print(len(model))

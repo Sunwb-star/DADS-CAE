@@ -3,6 +3,7 @@ import sys
 
 import networkx as nx
 import torch
+from matplotlib import pyplot as plt
 
 from net.net_utils import get_speed
 from utils.inference_utils import recordTime
@@ -23,7 +24,11 @@ def get_layers_latency(model, device):
     dict_layer_output = {}
     # 初始输入数据，随机初始化，只是用来进行延迟测试的数据
     # 这就相当于是第一层神经网络的输入数据
-    input = torch.rand((1, 24, 240, 240))
+    input_x = torch.rand((1, 24, 240, 240)).to(device)
+    orientation = torch.tensor(30).to(device)
+    goal_index = torch.tensor(0).to(device)
+    input = [input_x, orientation, goal_index]
+    input_bak = [input_x, orientation, goal_index]
     # 记录每一层的延迟
     layers_latency = []
     # 对于model中迭代的每一层网络来进行操作
@@ -39,6 +44,8 @@ def get_layers_latency(model, device):
                 # 对于concat操作,输入应为一个列表
                 for pre_index in pre_input_cond:
                     input.append(dict_layer_output[pre_index])
+                input[1] = input[1].unsqueeze(0)
+                input[2] = input[2].unsqueeze(0)
             else:
                 # 当前层的的输入从其依赖层中获得
                 input = dict_layer_output[pre_input_cond]
@@ -47,6 +54,12 @@ def get_layers_latency(model, device):
             input = input.to(device)
         # 将该层神经网络放到相应device中
         layer = layer.to(device)
+        if (layer_index == 1):
+            input = input_bak[0]
+        elif (layer_index == 16):
+            input = input_bak[1]
+        elif (layer_index == 17):
+            input = input_bak[2]
         # 记录推理时延和当前层的随机输出结果
         input, lat = recordTime(layer, input, device, epoch_cpu=10, epoch_gpu=10)
         # 如果模型需要进行DAG拓扑并且当前层是网络的分支点或者聚合点的话就更新dict_layer_output，用来为分支点或者聚合点后的网络层提供数据
@@ -85,11 +98,9 @@ def add_graph_edge(graph, vertex_index, input, layer_index, layer,
     cloud_vertex = "cloud"
     # 边缘设备节点
     edge_vertex = "edge"
-
     # 获取当前层在边缘端设备上的推理时延以及在云端设备上的推理时延
     # edge_lat = predict_model_latency(input, layer, device="edge", predictor_dict=predictor_dict)
     # cloud_lat = predict_model_latency(input, layer, device="cloud", predictor_dict=predictor_dict)
-
     # 获取当前层需要的传输时延
     # 获取当前节点的输入数据在网络上的传输大小
     transport_size = len(pickle.dumps(input))
@@ -97,13 +108,12 @@ def add_graph_edge(graph, vertex_index, input, layer_index, layer,
     speed = get_speed(network_type=net_type, bandwidth=bandwidth)
     # 计算传输时延
     transmission_lat = transport_size / speed
-
     # 一层DNN layer可以构建一条边，而构建一条边需要两个顶点
     # dict_input_size_node_name 可以根据输入数据大小构建对应的图顶点
     # 所以可以在执行DNN layer的前后分别构建 start_node以及end_node
     start_node, end_node, record_input = None, None, None
     # 如果当前层是汇入点，也即当前层的输入是一个列表，存储着多个数据的话
-    if isinstance(input, list):
+    if isinstance(input, list) and layer_index == 18:
         # 初始化layer_out
         layer_out = None
         # 赋值record_input
@@ -136,12 +146,12 @@ def add_graph_edge(graph, vertex_index, input, layer_index, layer,
             return vertex_index, input
         # 添加从前一个节点到当前节点的边
         graph.add_edge(start_node, end_node, capacity=transmission_lat)
-
+    print(start_node, end_node)
     # 注意：end_node可以用来在有向图中表示当前层，也就是DNN layer
     # 添加从边缘节点到dnn层的边
-    graph.add_edge(edge_vertex, end_node, capacity=cloud_latency)
+    # graph.add_edge(edge_vertex, end_node, capacity=cloud_latency)
     # 添加从dnn层到云端设备的边
-    graph.add_edge(end_node, cloud_vertex, capacity=edge_latency)
+    # graph.add_edge(end_node, cloud_vertex, capacity=edge_latency)
     # 记录有向图中的顶点node_name对应的DNN的第几层
     dict_node_layer[end_node] = layer_index + 1
     # 如果record_flag为true的话就记录DNN层中当前层对应的输出
@@ -218,6 +228,7 @@ def graph_construct(model, input, edge_latency_list, cloud_latency_list, bandwid
     graph.add_edge(edge_vertex, "v0", capacity=inf)
     # 构建图的顶点序号
     vertex_index = 0
+    input_bak = input
     # 遍历模型中的所有的层
     for layer_index, layer in enumerate(model):
         # print(layer_index, layer)
@@ -233,10 +244,17 @@ def graph_construct(model, input, edge_latency_list, cloud_latency_list, bandwid
                 for pre_index in pre_input_cond:
                     # 当前层的输入也就是对应的列表中的前一层的输出
                     input.append(dict_layer_output[pre_index])
+                input[1] = input[1].unsqueeze(0)
+                input[2] = input[2].unsqueeze(0)
             else:
                 # 当前层的的输入如果不是一个列表的话，就从其他层的输出获得
                 input = dict_layer_output[pre_input_cond]
-
+        # if (layer_index == 1):
+        #     input = input_bak[0]
+        # elif (layer_index == 16):
+        #     input = input_bak[1]
+        # elif (layer_index == 17):
+        #     input = input_bak[2]
         # model.record_output_list中标记的层数对应的DNN层的输出需要被记录
         # record_flag表示当前层的输出需不需要被记录
         record_flag = model.has_dag_topology and (layer_index + 1) in model.record_output_list
@@ -247,14 +265,18 @@ def graph_construct(model, input, edge_latency_list, cloud_latency_list, bandwid
                                              dict_input_size_node_name, dict_node_layer,
                                              dict_layer_input, dict_layer_output, record_flag=record_flag)
 
+    print(dict_input_size_node_name)
+    # 利用nx将图绘制出来
+    nx.draw(graph, with_labels=graph.nodes)
+    # 展示图
+    plt.show()
     # 主要负责处理出度大于1的顶点
     prepare_for_partition(graph, vertex_index, dict_node_layer)
     # 返回构建好的有向图、节点及对应的网络层的字典、网络层对应的输入的字典，dict_layer_input没用
-
     # 利用nx将图绘制出来
-    # nx.draw(graph, with_labels=graph.nodes)
+    nx.draw(graph, with_labels=graph.nodes)
     # 展示图
-    # plt.show()
+    plt.show()
     return graph, dict_node_layer, dict_layer_input
 
 
@@ -266,11 +288,17 @@ def get_node_name(input, vertex_index, dict_input_size_node_name):
     :param dict_input_size_node_name: 通过dict_for_input可以将DNN layer转化为有向图中的顶点，对应node_name
     :return: node_name，构建DAG边所需要的首位节点name
     """
-    # 获取输入数据相对应的信息
+    # 获取输入数据相对应的信息 ---> 做一下差异化
+    if (isinstance(input, list)):
+        input = input[0] + vertex_index
+    # print(input)
     len_of_shape = len(input.shape)
     input_shape = str(input.shape)  # 获取当前input的大小
+    # print(len_of_shape, input_shape)
     # input_slice用于根据传入数据的唯一性来校验当前DNN层的唯一性
     input_slice = input
+    if len_of_shape == 0:
+        input_slice = str(input_slice)
     for _ in range(len_of_shape - 1):
         input_slice = input_slice[0]
     # 获取input的前3个数据，保证数据的唯一性
