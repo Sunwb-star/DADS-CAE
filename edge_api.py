@@ -82,7 +82,7 @@ if __name__ == '__main__':
         start_client_sem(ip, port, input_x, model_type, partition_point, device)
     elif model_type == "AutoEncoderConv":
         # input_data = input_data.view(-1, 1, 240, 240)
-        partition_point = 7
+        partition_point = 19
         # plt.figure()
         # plt.imshow(input_data[0, 1, :, :].cpu().detach().numpy())
         # plt.show()

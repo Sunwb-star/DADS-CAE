@@ -147,9 +147,12 @@ def start_client_linear(ip, port, input_x, model_type, partition_point, device, 
     # 开始边缘端的推理，首先进行预热，传入的数据维度是(1, 1, 240, 240)
     inference_utils.warmUp(edge_model, input_x[0].unsqueeze(0), device)
     # 传入前23个地图进行推理，然后获取结果
-    edge_output, edge_latency = inference_utils.recordTime(edge_model, input_x[:23], device, epoch_cpu=30,
+    # edge_output, edge_latency = inference_utils.recordTime(edge_model, input_x[:23], device, epoch_cpu=30,
+    #                                                        epoch_gpu=100)
+    edge_output, edge_latency = inference_utils.recordTime(edge_model, input_x, device, epoch_cpu=30,
                                                            epoch_gpu=100)
-    edge_output_list = [edge_output, last_map]
+    # edge_output_list = [edge_output, last_map]
+    edge_output_list = [edge_output, orientation, goal_index]
     print(f"{model_type} 在边缘端设备上推理完成 - {edge_latency:.3f} ms")
     flag = net.get_short_data(conn)
     # 发送中间数据
@@ -162,8 +165,8 @@ def start_client_linear(ip, port, input_x, model_type, partition_point, device, 
     # 连续发送两个消息 防止消息粘包
     conn.sendall("avoid  sticky".encode())
     # 发送方向和目标等信息
-    extra_list = [orientation, goal_index]
-    net.send_short_data(conn, extra_list, "edge output")
+    # extra_list = [orientation, goal_index]
+    # net.send_short_data(conn, extra_list, "edge output")
     cloud_latency = net.get_short_data(conn)
     print(f"{model_type} 在云端设备上推理完成 - {cloud_latency:.3f} ms")
     print("================= DNN Collaborative Inference Finished. ===================")
@@ -201,6 +204,7 @@ def start_server_linear(_conn, _client, _model_type, device):
     # 接收中间数据并返回传输时延
     # 结束到的edge_output是一个list，第一个数据的形状是(23,1,15,15)，第二个形状是(1,1,240,240)
     edge_output, transfer_latency = net.get_data(conn)
+    print(edge_output)
     # print(edge_output[0].shape)
     # 连续接收两个消息 防止消息粘包
     conn.recv(40)
@@ -209,15 +213,17 @@ def start_server_linear(_conn, _client, _model_type, device):
     # 连续接收两个消息 防止消息粘包
     conn.recv(40)
     # 进行预热
+    print(edge_output[0].shape)
     inference_utils.warmUp(cloud_model, edge_output[0][0].unsqueeze(0), device)
     # 记录云端推理时延
     cloud_output, cloud_latency = inference_utils.recordTime(cloud_model, edge_output[0], device, epoch_cpu=30,
                                                              epoch_gpu=100)
+
     print("================= Start Navigation Decision Evaluating ===================")
     # 得到的推理结果形状是(23, 1, 240, 240)，进行重新变换
-    cloud_output = cloud_output.view(1, 23, 240, 240)
-    edge_output[0] = cloud_output
-    encoder_decoder_data = torch.cat(edge_output, dim=1)
+    encoder_decoder_data = cloud_output.view(1, 24, 240, 240)
+    # edge_output[0] = cloud_output
+    # encoder_decoder_data = torch.cat(edge_output, dim=1)
     # print(encoder_decoder_data.shape)
     # 可视化一下
     # plt.figure()
@@ -225,9 +231,9 @@ def start_server_linear(_conn, _client, _model_type, device):
     # plt.show()
     # print(encoder_decoder_data[0, -1].max(), encoder_decoder_data[0, -1].min())
     # 获取方向和目标Index信息
-    extra_list = net.get_short_data(conn)
-    orientation = extra_list[0]
-    goal_index = extra_list[1]
+    # extra_list = net.get_short_data(conn)
+    orientation = edge_output[1]
+    goal_index = edge_output[2]
     # 开始记录时延信息
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
@@ -235,7 +241,7 @@ def start_server_linear(_conn, _client, _model_type, device):
     for i in range(10):
         # 首先进行二值化处理，得到新的地图(1,24,240,240)
         threshold = 0.25
-        encoder_decoder_data[0, :23] = (encoder_decoder_data[0, :23] > threshold).float()
+        encoder_decoder_data[0, :24] = (encoder_decoder_data[0, :24] > threshold).float()
         # plt.figure()
         # plt.imshow(encoder_decoder_data[0, 1, :, :].cpu().detach().numpy())
         # plt.show()
@@ -278,7 +284,6 @@ def start_client_sem(ip, port, input_x, model_type, partition_point, device):
     edge_model, _ = inference_utils.model_partition_linear(model, partition_point)
     edge_model = edge_model.to(device)
     edge_model.eval()
-    print(edge_model)
     # 传入数据的shape是(1, 24, 240, 240)
     # 开始边缘端的推理，首先进行预热，传入的数据维度是(1, 24, 240, 240)
     inference_utils.warmUp(edge_model, input_x[0], device)
@@ -334,6 +339,7 @@ def start_server_sem(_conn, _client, _model_type, device):
     # 接收中间数据并返回传输时延
     # 结束到的edge_output是一个list，第一个数据的形状是(23,1,15,15)，第二个形状是(1,1,240,240)
     edge_output, transfer_latency = net.get_data(conn)
+    print(edge_output)
     # print(edge_output[0].shape)
     # 连续接收两个消息 防止消息粘包
     conn.recv(40)

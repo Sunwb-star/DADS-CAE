@@ -8,7 +8,7 @@ import models.InceptionBlock as Inception
 import models.InceptionBlockV2 as Inception_v2
 import models.SemExpModel as SemExpNet
 from models.AlexNet import AlexNet
-from models.AutoEncoderS import Autoencoder
+from models.AutoEncoderConv import Autoencoder
 from models.EasyModel import EasyModel
 from models.InceptionBlock import InceptionBlock
 from models.InceptionBlockV2 import InceptionBlockV2
