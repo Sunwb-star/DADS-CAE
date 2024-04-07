@@ -8,6 +8,7 @@ import torch.nn as nn
 class Sem_Exp(nn.Module):
     def __init__(self, hidden_size=256, num_sem_categories=16):
         super(Sem_Exp, self).__init__()
+        self.has_dag_topology = False
         # input_shape的大小是(1, 24, 240, 240)
         # input_shape[1]的值是local_w:240，input_shape[2]的值是local_h:240
         out_size = int(240 / 16.0) * int(240 / 16.0)

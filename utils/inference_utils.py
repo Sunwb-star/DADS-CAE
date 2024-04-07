@@ -1,3 +1,4 @@
+import pickle
 import time
 
 import torch
@@ -14,6 +15,7 @@ from models.InceptionBlock import InceptionBlock
 from models.InceptionBlockV2 import InceptionBlockV2
 from models.SemExpLinearModel import Sem_Exp
 from models.VggNet import VggNet
+from net.net_utils import get_speed
 from utils.excel_utils import *
 
 
@@ -316,3 +318,90 @@ def model_partition_linear(model, index):
             cloud_model.add_module(f"{idx}-{layer.__class__.__name__}", layer)
         idx += 1
     return edge_model, cloud_model
+
+
+def neuron_surgeon_deployment(model_type, network_type, define_speed, show, device):
+    """
+    为DNN模型选取最优划分点
+    :param model: DNN模型
+    :param network_type: 3g or lte or wifi
+    :param define_speed: bandwidth
+    :param show: 是否展示
+    :return: 选取的最优partition_point
+    """
+    res_lat = None
+    res_index = None
+    res_layer_index = None
+    predictor_dict = {}
+    model = get_dnn_model(model_type)
+    # 标记layer顺序 - 指no-skip layer
+    layer_index = 0
+    for index in range(len(model) + 1):
+        if index != 0 and skip_layer(model[index - 1]):
+            continue
+        edge_input = get_input(model_type)
+        edge_model, cloud_model = model_partition_linear(model, index)
+        edge_input = edge_input.to(device)
+        # 将该层放到相应设备上
+        edge_model = edge_model.to(device)
+        # 记录推理时延
+        edge_output, edge_latency = recordTime(edge_model, edge_input, device, epoch_cpu=10, epoch_gpu=10)
+        transport_size = len(pickle.dumps(edge_output))
+        speed = get_speed(network_type=network_type, bandwidth=define_speed)
+        transmission_lat = transport_size / speed
+        cloud_output, cloud_latency = recordTime(cloud_model, edge_output, device, epoch_cpu=10, epoch_gpu=10)
+        # show detail
+        total_latency = edge_latency + transmission_lat + cloud_latency
+        now_layer = get_layer(model, index)
+        if show:
+            print(f"index {layer_index + 1} - layer : {now_layer} \n"
+                  f"edge latency : {edge_latency:.2f} ms , transmit latency : {transmission_lat:.2f} ms , "
+                  f"cloud latency : {cloud_latency:.2f} ms , total latency : {total_latency:.2f} ms")
+            print(
+                "----------------------------------------------------------------------------------------------------------")
+
+        #   get best partition point
+        #   index - real layer index : get layer
+        #   layer_index : only used as flag
+        if res_lat is None or total_latency < res_lat:
+            res_lat = total_latency
+            res_index = index
+            res_layer_index = layer_index
+        layer_index += 1
+    # show best partition point
+    res_layer = get_layer(model, res_index)
+    print(f"best latency : {res_lat:.2f} ms , best partition point : {res_layer_index} - {res_layer}")
+    print("----------------------------------------------------------------------------------------------------------")
+
+    # return the best partition point
+    # 在第res_index的后面分割
+    return res_index
+
+
+def skip_layer(layer):
+    """ 一些不重要的层可以选择跳过"""
+    if isinstance(layer, nn.ReLU) or isinstance(layer, nn.ReLU6) or isinstance(layer, nn.Dropout):
+        return True
+
+
+def get_input(model_type):
+    """
+    根据HW生成相应的pytorch数据 -> torch(1,3,224,224)
+    :param HW: HW表示输入的高度和宽度
+    :return: torch数据
+    """
+    if model_type == "AutoEncoderConv":
+        return torch.rand(size=(1, 1, 240, 240), requires_grad=False)
+    elif model_type == "Sem_Exp":
+        return torch.rand(size=(1, 24, 240, 240), requires_grad=False)
+
+
+def get_layer(model, point):
+    """
+    get model's partition layer
+    """
+    if point == 0:
+        layer = None
+    else:
+        layer = model[point - 1]
+    return layer

@@ -10,6 +10,7 @@ import torch
 from net.monitor_client import MonitorClient
 from server_func import start_client_linear
 from server_func import start_client_sem
+from utils.inference_utils import neuron_surgeon_deployment
 
 warnings.filterwarnings("ignore")
 
@@ -56,11 +57,6 @@ if __name__ == '__main__':
 
     # 根据带宽和其他的一些信息来选择走哪一条分支
     print(f"get bandwidth value : {bandwidth_value.value} MB/s")
-    # if (bandwidth_value.value < 10):
-    #     model_type = "AutoEncoderConv"
-    # else:
-    #     model_type = "Sem_Exp"
-    # step2 准备input数据
     hdf5_file_path = "models/autoencoder_data.h5"
     with h5py.File(hdf5_file_path, 'r') as f:
         # 读取HDF5文件中的数据集
@@ -78,11 +74,15 @@ if __name__ == '__main__':
     if model_type == "Sem_Exp":
         # 传入的参数input_data的形状是(1, 24, 240, 240)
         input_x = [input_data, orientation, goal_index]
-        partition_point = 15
+        partition_point = neuron_surgeon_deployment(model_type, network_type="wifi",
+                                                    define_speed=upload_bandwidth, show=True, device=device)
+        # partition_point = 15
         start_client_sem(ip, port, input_x, model_type, partition_point, device)
     elif model_type == "AutoEncoderConv":
+        partition_point = neuron_surgeon_deployment(model_type, network_type="wifi",
+                                                    define_speed=upload_bandwidth, show=True, device=device)
         # input_data = input_data.view(-1, 1, 240, 240)
-        partition_point = 19
+        # partition_point = 19
         # plt.figure()
         # plt.imshow(input_data[0, 1, :, :].cpu().detach().numpy())
         # plt.show()

@@ -1,11 +1,13 @@
+from collections import abc
+
 import torch
 import torch.nn as nn
-from collections import abc
+
 
 class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
-
+        self.has_dag_topology = False
         # Encoder layers
         self.encoder = nn.Sequential(
             # output_size=(input_size - kernel_size + 2 * padding) / stride + 1
@@ -69,13 +71,13 @@ class Autoencoder(nn.Module):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
-    
+
     def __iter__(self):
         return SentenceIterator(self.encoder, self.decoder)
-    
+
     def __len__(self):
         return self.len
-    
+
     def __getitem__(self, item):
         try:
             if item < self.encoder_len:
@@ -85,7 +87,7 @@ class Autoencoder(nn.Module):
         except IndexError:
             raise StopIteration()
         return layer
-    
+
 
 class SentenceIterator(abc.Iterator):
     def __init__(self, encoder, decoder):
@@ -106,5 +108,3 @@ class SentenceIterator(abc.Iterator):
         else:
             self._index += 1
         return layer
-    
-
