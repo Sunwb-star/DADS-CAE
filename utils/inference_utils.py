@@ -336,7 +336,11 @@ def neuron_surgeon_deployment(model_type, network_type, define_speed, show, devi
     model = get_dnn_model(model_type)
     # 标记layer顺序 - 指no-skip layer
     layer_index = 0
+    all_time = 0.0
     for index in range(len(model) + 1):
+        starter = torch.cuda.Event(enable_timing=True)
+        ender = torch.cuda.Event(enable_timing=True)
+        starter.record()
         if index != 0 and skip_layer(model[index - 1]):
             continue
         edge_input = get_input(model_type)
@@ -368,11 +372,16 @@ def neuron_surgeon_deployment(model_type, network_type, define_speed, show, devi
             res_index = index
             res_layer_index = layer_index
         layer_index += 1
+
+        ender.record()
+        torch.cuda.synchronize()
+        curr_time = starter.elapsed_time(ender)
+        all_time += curr_time
     # show best partition point
     res_layer = get_layer(model, res_index)
     print(f"best latency : {res_lat:.2f} ms , best partition point : {res_layer_index} - {res_layer}")
+    print(f"计算分割点花费时间 : {all_time:.2f} ms.")
     print("----------------------------------------------------------------------------------------------------------")
-
     # return the best partition point
     # 在第res_index的后面分割
     return res_index

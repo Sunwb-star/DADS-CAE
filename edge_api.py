@@ -57,7 +57,7 @@ if __name__ == '__main__':
 
     # 根据带宽和其他的一些信息来选择走哪一条分支
     print(f"get bandwidth value : {bandwidth_value.value} MB/s")
-    hdf5_file_path = "models/autoencoder_data.h5"
+    hdf5_file_path = "data/autoencoder_data/autoencoder_data.h5"
     with h5py.File(hdf5_file_path, 'r') as f:
         # 读取HDF5文件中的数据集
         loaded_tensor = torch.tensor(numpy.array(f['autoencoder_datasets']))
@@ -81,10 +81,8 @@ if __name__ == '__main__':
     elif model_type == "AutoEncoderConv":
         partition_point = neuron_surgeon_deployment(model_type, network_type="wifi",
                                                     define_speed=upload_bandwidth, show=True, device=device)
-        # input_data = input_data.view(-1, 1, 240, 240)
-        # partition_point = 19
         # plt.figure()
-        # plt.imshow(input_data[0, 1, :, :].cpu().detach().numpy())
+        # plt.imshow(input_data[0, 0, :, :].cpu().detach().numpy())
         # plt.show()
         # 传入的数据形状是(1, 24, 240, 240)
         start_client_linear(ip, port, input_data, model_type, partition_point, device, orientation, goal_index)

@@ -131,8 +131,8 @@ def start_client_linear(ip, port, input_x, model_type, partition_point, device, 
     net.send_short_data(conn, model_type, msg="model type")
     # 读取模型
     model = inference_utils.get_dnn_model(model_type)
-    # if model_type == "AutoEncoderConv":
-    #     model.load_state_dict(torch.load('models/autoencoder_model.pth'))
+    if model_type == "AutoEncoderConv":
+        model.load_state_dict(torch.load('pretrained_model_pths/autoencoder_model.pth'))
     model.eval()
     # 发送划分点
     net.send_short_data(conn, partition_point, msg="partition strategy")
@@ -190,8 +190,8 @@ def start_server_linear(_conn, _client, _model_type, device):
     # print(f"get model type successfully.")
     # 读取模型
     model = inference_utils.get_dnn_model(model_type)
-    # if model_type == "AutoEncoderConv":
-    #     model.load_state_dict(torch.load('models/autoencoder_model.pth'))
+    if model_type == "AutoEncoderConv":
+        model.load_state_dict(torch.load('pretrained_model_pths/autoencoder_model.pth'))
     model.eval()
     # 接收模型分层点
     partition_point = net.get_short_data(conn)
@@ -238,7 +238,7 @@ def start_server_linear(_conn, _client, _model_type, device):
     starter = torch.cuda.Event(enable_timing=True)
     ender = torch.cuda.Event(enable_timing=True)
     starter.record()
-    for i in range(10):
+    for i in range(2):
         # 首先进行二值化处理，得到新的地图(1,24,240,240)
         threshold = 0.25
         encoder_decoder_data[0, :24] = (encoder_decoder_data[0, :24] > threshold).float()
@@ -252,7 +252,7 @@ def start_server_linear(_conn, _client, _model_type, device):
     ender.record()
     torch.cuda.synchronize()
     curr_time = starter.elapsed_time(ender)
-    all_time = curr_time / 10
+    all_time = curr_time / 2
     print(f"{model_type} 在云端设备上推理完成 - {cloud_latency + all_time:.3f} ms")
     net.send_short_data(conn, cloud_latency + all_time, "cloud latency")
     print("================= DNN Collaborative Inference Finished. ===================")
